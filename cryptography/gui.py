@@ -36,7 +36,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from gui_apps import TcpChatPanel, UdpChatPanel, VotingPanel
+from gui_apps import BluetoothChatPanel, TcpChatPanel, UdpChatPanel, VotingPanel
+from gui_panels import (
+    AsymmetricEncryptPanel,
+    ClassicalPanel,
+    HMACPanel,
+    HashPanel,
+    KeyExchangePanel,
+    SignaturePanel,
+    SymmetricCipherPanel,
+)
 from gui_specs import (
     BYTES_HEX,
     BYTES_UTF8,
@@ -51,9 +60,34 @@ from gui_specs import (
 from main import MODULES, THEME_ORDER, THEMES
 
 PANELS_PERSO = {
+    # Applications
     "applications.tcp_secure": TcpChatPanel,
     "applications.udp_chat": UdpChatPanel,
+    "applications.bluetooth_secure": BluetoothChatPanel,
     "applications.voting": VotingPanel,
+    # Classical
+    "classical.caesar": lambda: ClassicalPanel("Caesar"),
+    "classical.vigenere": lambda: ClassicalPanel("Vigenere"),
+    "classical.otp": lambda: ClassicalPanel("OTP"),
+    "classical.hill": lambda: ClassicalPanel("Hill"),
+    # Symmetric
+    "symmetric.stream.rc4": lambda: SymmetricCipherPanel("RC4"),
+    "symmetric.block.des": lambda: SymmetricCipherPanel("DES"),
+    "symmetric.block.aes": lambda: SymmetricCipherPanel("AES"),
+    # Asymmetric
+    "asymmetric.rsa": lambda: AsymmetricEncryptPanel("RSA"),
+    "asymmetric.elgamal": lambda: AsymmetricEncryptPanel("ElGamal"),
+    "asymmetric.diffie_hellman": lambda: KeyExchangePanel("DH"),
+    "asymmetric.ecc": lambda: KeyExchangePanel("ECDH"),
+    # Hashing
+    "hashing.md5": lambda: HashPanel("MD5"),
+    "hashing.sha256": lambda: HashPanel("SHA-256"),
+    "hashing.sha512": lambda: HashPanel("SHA-512"),
+    "hashing.hmac": lambda: HMACPanel(),
+    # Signatures
+    "signatures.rsa_signature": lambda: SignaturePanel("RSA-PSS"),
+    "signatures.elgamal_sig": lambda: SignaturePanel("ElGamal"),
+    "signatures.dsa_ecdsa": lambda: SignaturePanel("ECDSA-P256"),
 }
 
 
@@ -84,28 +118,37 @@ QSplitter::handle:hover { background-color: #5da9e9; }
 
 /* Toolbar */
 QToolBar {
-    background-color: #ffffff;
+    background-color: #003f91;
     border: none;
-    border-bottom: 1px solid #d6dde6;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
     spacing: 4px;
     padding: 10px 16px;
 }
+#brand, #brand QLabel {
+    background-color: transparent;
+    color: #ffffff;
+}
+QToolBar::separator {
+    background-color: rgba(255, 255, 255, 0.25);
+    width: 1px;
+    margin: 6px 8px;
+}
 QToolBar QToolButton {
     background-color: transparent;
-    color: #1e3a6b;
+    color: #ffffff;
     border: 1px solid transparent;
     border-radius: 6px;
     padding: 6px 12px;
-    font-weight: 500;
+    font-weight: 600;
 }
 QToolBar QToolButton:hover {
-    background-color: #e5f4e3;
-    color: #003f91;
+    background-color: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
 }
-QToolBar QToolButton:pressed { background-color: #d3ead0; }
+QToolBar QToolButton:pressed { background-color: rgba(255, 255, 255, 0.25); }
 QToolBar QToolButton:disabled {
     background-color: transparent;
-    color: #b8c2d1;
+    color: rgba(255, 255, 255, 0.4);
 }
 
 /* Status bar */
@@ -224,6 +267,17 @@ QComboBox::drop-down { border: none; width: 24px; }
 QComboBox::down-arrow {
     width: 10px; height: 10px;
 }
+QComboBox::item {
+    background-color: #ffffff;
+    color: #0f1e3a;
+    padding: 6px 12px;
+    border: none;
+}
+QComboBox::item:selected,
+QComboBox::item:hover {
+    background-color: #003f91;
+    color: #ffffff;
+}
 QComboBox QAbstractItemView {
     background-color: #ffffff;
     color: #0f1e3a;
@@ -233,6 +287,12 @@ QComboBox QAbstractItemView {
     selection-color: #ffffff;
     padding: 4px;
     outline: none;
+    show-decoration-selected: 0;
+}
+QComboBox QAbstractItemView::item {
+    padding: 6px 12px;
+    border: none;
+    min-height: 22px;
 }
 QSpinBox::up-button, QSpinBox::down-button {
     width: 20px;
@@ -251,7 +311,9 @@ QPushButton {
     border-radius: 6px;
     padding: 8px 18px;
     font-weight: 500;
+    outline: none;
 }
+QPushButton:focus { outline: none; }
 QPushButton:hover {
     background-color: #e5f4e3;
     border-color: #5da9e9;
@@ -564,32 +626,6 @@ class CryptoFenetre(QMainWindow):
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
 
-        marque = QWidget()
-        marque.setObjectName("marque")
-        marque_layout = QVBoxLayout(marque)
-        marque_layout.setContentsMargins(22, 20, 20, 16)
-        marque_layout.setSpacing(2)
-        # Scope via #marque so descendants (the labels) don't inherit the border.
-        marque.setStyleSheet(
-            "#marque {"
-            "  background-color: #003f91;"
-            "  border-bottom: 1px solid #002a66;"
-            "}"
-        )
-        titre_marque = QLabel("Cryptography")
-        titre_marque.setStyleSheet(
-            "color: #ffffff; font-size: 17px; font-weight: 700;"
-            " background: transparent; border: none;"
-        )
-        sous_marque = QLabel("IMPLEMENTATIONS")
-        sous_marque.setStyleSheet(
-            "color: #5da9e9; font-size: 10px; font-weight: 700;"
-            " letter-spacing: 1.6px; background: transparent; border: none;"
-        )
-        marque_layout.addWidget(titre_marque)
-        marque_layout.addWidget(sous_marque)
-        sidebar_layout.addWidget(marque)
-
         self.arbre = QTreeWidget()
         self.arbre.setHeaderHidden(True)
         self.arbre.setIndentation(14)
@@ -643,9 +679,7 @@ class CryptoFenetre(QMainWindow):
         self.sortie.setPlaceholderText("Selectionnez un module et lancez le scenario.")
         scenar_layout.addWidget(self.sortie, 1)
 
-        self.tabs.addTab(scenar_widget, "Scenario")
-
-        # Custom-values tab : QStackedWidget
+        # Custom-values tab : QStackedWidget (now FIRST tab, default view)
         self.custom_stack = QStackedWidget()
         self._index_par_chemin: dict = {}
         defaut_widget = QWidget()
@@ -672,28 +706,86 @@ class CryptoFenetre(QMainWindow):
             self._index_par_chemin[chemin] = idx
         self.tabs.addTab(self.custom_stack, "Tester avec mes valeurs")
 
+        # Scenario tab (second now)
+        self.tabs.addTab(scenar_widget, "Scenario")
+
         splitter.addWidget(self.tabs)
         splitter.setSizes([300, 1020])
         splitter.setCollapsible(0, False)
         splitter.setCollapsible(1, False)
         self.setCentralWidget(splitter)
 
-        # ----- Toolbar -----
+        # ----- Toolbar (with brand on the left) -----
         toolbar = QToolBar("Actions")
         toolbar.setMovable(False)
         toolbar.setIconSize(toolbar.iconSize())
 
+        # Brand block on the LEFT of the toolbar (fixed width = sidebar width)
+        brand_widget = QWidget()
+        brand_widget.setObjectName("brand")
+        brand_widget.setFixedWidth(300)  # align with sidebar splitter size
+        brand_layout = QHBoxLayout(brand_widget)
+        brand_layout.setContentsMargins(28, 0, 8, 0)
+        brand_layout.setSpacing(8)
+        titre_marque = QLabel("Cryptography")
+        titre_marque.setStyleSheet(
+            "QLabel { color: #ffffff; font-size: 22px; font-weight: 700;"
+            " background-color: transparent; border: none;"
+            " letter-spacing: 0.3px; }"
+        )
+        brand_layout.addWidget(titre_marque)
+        brand_layout.addStretch(1)
+        toolbar.addWidget(brand_widget)
+
+        # Action buttons aligned with the tabs below them.
+        # Tabs sit left-aligned in the right pane, so the buttons hug the left
+        # of the toolbar area right after the brand block.
+        def _action_btn(label: str, shortcut: str, slot) -> QPushButton:
+            btn = QPushButton(label)
+            btn.setShortcut(shortcut)
+            btn.clicked.connect(slot)
+            btn.setStyleSheet(
+                "QPushButton { background: transparent; color: #ffffff;"
+                " border: 1px solid transparent; border-radius: 6px;"
+                " padding: 6px 14px; font-weight: 600; }"
+                "QPushButton:hover { background: rgba(255,255,255,0.15); }"
+                "QPushButton:pressed { background: rgba(255,255,255,0.25); }"
+                "QPushButton:disabled { color: rgba(255,255,255,0.4); }"
+            )
+            return btn
+
+        # Left padding so the run button aligns with tab text indent.
+        spacer_left = QWidget()
+        spacer_left.setFixedWidth(40)
+        spacer_left.setStyleSheet("background: transparent;")
+        toolbar.addWidget(spacer_left)
+
+        self._action_run_btn = _action_btn(
+            "Lancer scenario", "Ctrl+R", self._lancer_selectionne
+        )
+        toolbar.addWidget(self._action_run_btn)
+
+        # Gap between the two buttons (mirrors the gap between tabs)
+        gap = QWidget()
+        gap.setFixedWidth(20)
+        gap.setStyleSheet("background: transparent;")
+        toolbar.addWidget(gap)
+
+        self._action_clear_btn = _action_btn(
+            "Effacer", "Ctrl+L", self.sortie.clear
+        )
+        toolbar.addWidget(self._action_clear_btn)
+
+        # Keep QAction stubs for compatibility with _maj_etat & shortcuts
         self._action_run = QAction("Lancer scenario", self)
         self._action_run.setShortcut("Ctrl+R")
         self._action_run.triggered.connect(self._lancer_selectionne)
-        toolbar.addAction(self._action_run)
-
-        toolbar.addSeparator()
-
         self._action_clear = QAction("Effacer", self)
         self._action_clear.setShortcut("Ctrl+L")
         self._action_clear.triggered.connect(self.sortie.clear)
-        toolbar.addAction(self._action_clear)
+        self.addAction(self._action_run)
+        self.addAction(self._action_clear)
+
         self.addToolBar(toolbar)
 
         # ----- Status bar -----
@@ -725,7 +817,13 @@ class CryptoFenetre(QMainWindow):
         return self._panel_indisponible(label)
 
     def _envelopper_panel(self, panel: QWidget, label: str) -> QWidget:
-        """Ajoute un titre standard au-dessus d'un panel custom."""
+        """Ajoute un titre standard au-dessus d'un panel custom.
+
+        Le panel est encapsule dans une QScrollArea pour que les controles du
+        bas (input chat, boutons) restent toujours accessibles meme si la
+        fenetre est trop petite pour afficher tout le contenu d'un coup.
+        """
+        from PySide6.QtWidgets import QScrollArea
         contenant = QWidget()
         layout = QVBoxLayout(contenant)
         layout.setContentsMargins(28, 24, 28, 24)
@@ -737,7 +835,14 @@ class CryptoFenetre(QMainWindow):
         _set_role(sous, "subtitle")
         layout.addWidget(sous)
         layout.addWidget(_divider())
-        layout.addWidget(panel, 1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(panel)
+        scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+        )
+        layout.addWidget(scroll, 1)
         return contenant
 
     def _panel_indisponible(self, label: str) -> QWidget:
@@ -796,6 +901,7 @@ class CryptoFenetre(QMainWindow):
 
     def _maj_etat(self, en_cours: bool, chemin: str = "") -> None:
         self._action_run.setEnabled(not en_cours)
+        self._action_run_btn.setEnabled(not en_cours)
         if en_cours:
             self._statut_indicateur.setText(" En cours")
             _set_role(self._statut_indicateur, "status-active")
@@ -813,7 +919,8 @@ class CryptoFenetre(QMainWindow):
         if self._est_occupe():
             self.statusBar().showMessage("Occupe : attendez la fin du run.", 2500)
             return
-        self.tabs.setCurrentIndex(0)
+        # Switch to Scenario tab (now index 1) to show the demo output
+        self.tabs.setCurrentIndex(1)
         self.sortie.appendPlainText(f"\n=== {chemin} ===")
         self._chemin_actif = chemin
         self._maj_etat(True, chemin)

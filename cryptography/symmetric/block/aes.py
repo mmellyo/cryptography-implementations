@@ -9,12 +9,40 @@ from Crypto.Util.Padding import pad, unpad
 from common.pgm import chemin_asset, ecrire, lire
 
 
-def chiffrer_cbc(message: bytes, cle: bytes, iv: bytes) -> bytes:
-    return AES.new(cle, AES.MODE_CBC, iv=iv).encrypt(pad(message, 16))
+PADDINGS = ("PKCS7", "Zero", "None")
 
 
-def dechiffrer_cbc(chiffre: bytes, cle: bytes, iv: bytes) -> bytes:
-    return unpad(AES.new(cle, AES.MODE_CBC, iv=iv).decrypt(chiffre), 16)
+def _pad(message: bytes, padding: str = "PKCS7", bloc: int = 16) -> bytes:
+    if padding == "PKCS7":
+        return pad(message, bloc)
+    if padding == "Zero":
+        reste = bloc - (len(message) % bloc)
+        if reste == bloc:
+            return message
+        return message + b"\x00" * reste
+    if padding == "None":
+        if len(message) % bloc != 0:
+            raise ValueError(f"Padding=None : message doit etre multiple de {bloc} octets")
+        return message
+    raise ValueError(f"Padding inconnu : {padding}")
+
+
+def _unpad(message: bytes, padding: str = "PKCS7", bloc: int = 16) -> bytes:
+    if padding == "PKCS7":
+        return unpad(message, bloc)
+    if padding == "Zero":
+        return message.rstrip(b"\x00")
+    if padding == "None":
+        return message
+    raise ValueError(f"Padding inconnu : {padding}")
+
+
+def chiffrer_cbc(message: bytes, cle: bytes, iv: bytes, padding: str = "PKCS7") -> bytes:
+    return AES.new(cle, AES.MODE_CBC, iv=iv).encrypt(_pad(message, padding))
+
+
+def dechiffrer_cbc(chiffre: bytes, cle: bytes, iv: bytes, padding: str = "PKCS7") -> bytes:
+    return _unpad(AES.new(cle, AES.MODE_CBC, iv=iv).decrypt(chiffre), padding)
 
 
 def chiffrer_ctr(message: bytes, cle: bytes, nonce: bytes) -> bytes:
@@ -23,6 +51,56 @@ def chiffrer_ctr(message: bytes, cle: bytes, nonce: bytes) -> bytes:
 
 def dechiffrer_ctr(chiffre: bytes, cle: bytes, nonce: bytes) -> bytes:
     return AES.new(cle, AES.MODE_CTR, nonce=nonce).decrypt(chiffre)
+
+
+def chiffrer_ecb(message: bytes, cle: bytes, padding: str = "PKCS7") -> bytes:
+    return AES.new(cle, AES.MODE_ECB).encrypt(_pad(message, padding))
+
+
+def dechiffrer_ecb(chiffre: bytes, cle: bytes, padding: str = "PKCS7") -> bytes:
+    return _unpad(AES.new(cle, AES.MODE_ECB).decrypt(chiffre), padding)
+
+
+def chiffrer_cfb(message: bytes, cle: bytes, iv: bytes) -> bytes:
+    return AES.new(cle, AES.MODE_CFB, iv=iv).encrypt(message)
+
+
+def dechiffrer_cfb(chiffre: bytes, cle: bytes, iv: bytes) -> bytes:
+    return AES.new(cle, AES.MODE_CFB, iv=iv).decrypt(chiffre)
+
+
+def chiffrer_ofb(message: bytes, cle: bytes, iv: bytes) -> bytes:
+    return AES.new(cle, AES.MODE_OFB, iv=iv).encrypt(message)
+
+
+def dechiffrer_ofb(chiffre: bytes, cle: bytes, iv: bytes) -> bytes:
+    return AES.new(cle, AES.MODE_OFB, iv=iv).decrypt(chiffre)
+
+
+def chiffrer_gcm(message: bytes, cle: bytes, nonce: bytes, aad: bytes = b"") -> bytes:
+    """Renvoie nonce_len(1) || nonce || tag(16) || ciphertext."""
+    cipher = AES.new(cle, AES.MODE_GCM, nonce=nonce)
+    if aad:
+        cipher.update(aad)
+    ct, tag = cipher.encrypt_and_digest(message)
+    return bytes([len(nonce)]) + nonce + tag + ct
+
+
+def dechiffrer_gcm(blob: bytes, cle: bytes, aad: bytes = b"") -> bytes:
+    """Inverse de chiffrer_gcm. Leve ValueError si tag invalide (manipulation)."""
+    if len(blob) < 1 + 12 + 16:
+        raise ValueError("GCM blob trop court")
+    nlen = blob[0]
+    nonce = blob[1:1 + nlen]
+    tag = blob[1 + nlen:1 + nlen + 16]
+    ct = blob[1 + nlen + 16:]
+    cipher = AES.new(cle, AES.MODE_GCM, nonce=nonce)
+    if aad:
+        cipher.update(aad)
+    try:
+        return cipher.decrypt_and_verify(ct, tag)
+    except ValueError as e:
+        raise ValueError(f"GCM : tag invalide ou manipulation detectee ({e})")
 
 
 def visualiser_modes_image():

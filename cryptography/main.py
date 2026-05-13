@@ -1,4 +1,11 @@
-"""Cryptography implementations launcher."""
+"""Cryptography implementations launcher.
+
+CLI front-end mirroring the desktop GUI layout :
+- Branded header in French Blue.
+- Modules grouped by theme, displayed as a sidebar-style list.
+- Per-module choice between the pre-defined scenario and the
+  'Tester avec mes valeurs' interactive form (same SPECS as the GUI/TUI).
+"""
 import importlib
 import sys
 
@@ -70,17 +77,63 @@ ALIASES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Palette (approximated for the 256-color terminal palette).
+#   French Blue #003f91 -> 25 (deep blue), used for brand / titles / actions
+#   Cool Sky    #5da9e9 -> 75 (light blue), used for hints / focus
+#   Honeydew    #e5f4e3 -> 194 (very light green), used for success surfaces
+# ---------------------------------------------------------------------------
+_USE_COLOR = sys.stdout.isatty()
+
+
+def _c(code: str, text: str) -> str:
+    if not _USE_COLOR:
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _subtitle(text: str) -> str: return _c("38;5;245", text)
+def _accent(text: str) -> str:   return _c("38;5;75", text)
+def _brand(text: str) -> str:    return _c("1;97;48;5;25", text)
+def _label(text: str) -> str:    return _c("1;38;5;25", text)
+def _err(text: str) -> str:      return _c("38;5;160", text)
+def _muted(text: str) -> str:    return _c("38;5;244", text)
+
+
+def _term_width(default: int = 78) -> int:
+    try:
+        import shutil
+        return max(40, min(shutil.get_terminal_size().columns, 100))
+    except Exception:
+        return default
+
+
+def _divider() -> str:
+    return _muted("-" * _term_width())
+
+
+def _afficher_entete():
+    largeur = _term_width()
+    print()
+    print(_brand(" Cryptography ".ljust(largeur)))
+    print(_subtitle("  Implementations interactives - scenario ou tes propres valeurs"))
+    print(_divider())
+
+
 def afficher_menu():
-    print("\n" + "=" * 50)
-    print("  Cryptography implementations")
-    print("=" * 50)
+    _afficher_entete()
     for theme in THEME_ORDER:
-        print(f"\n  {THEMES[theme]}")
+        print()
+        print(_label(f"  {THEMES[theme]}"))
         for (t, slug), (_, label) in MODULES.items():
             if t == theme:
-                print(f"    {theme}.{slug:<10s}  {label}")
-    print("\n    all   run every demo")
-    print("    q     quit")
+                ref = f"{theme}.{slug}"
+                print(f"    {_accent(ref.ljust(28))} {label}")
+    print()
+    print(_divider())
+    print(f"  {_accent('all')}   {_muted('lance tous les scenarios')}")
+    print(f"  {_accent('q')}     {_muted('quitter')}")
+    print()
 
 
 def _resoudre(token):
@@ -94,27 +147,144 @@ def _resoudre(token):
     return None
 
 
-def lancer(token):
-    cle = _resoudre(token)
-    if cle is None:
-        print(f"  Inconnu : {token}")
-        return
-    chemin, _ = cle
+def _executer_scenario(chemin: str) -> None:
+    print()
+    print(_label(f"=== {chemin} ==="))
+    print(_subtitle("Scenario pre-defini"))
+    print(_divider())
     try:
         module = importlib.import_module(chemin)
         if not hasattr(module, "demo"):
-            print(f"  {chemin} : pas de fonction demo()")
+            print(_err(f"  {chemin} : pas de fonction demo()"))
             return
         module.demo()
     except ImportError as exc:
-        print(f"  Import error : {exc}\n  pip install -r requirements.txt")
+        print(_err(f"  Import error : {exc}"))
+        print(_subtitle("  pip install -r requirements.txt"))
     except Exception as exc:
-        print(f"  Erreur : {exc}")
+        print(_err(f"  Erreur : {type(exc).__name__}: {exc}"))
+
+
+def _formulaire_perso(chemin: str, label: str) -> None:
+    """GUI's 'Tester avec mes valeurs' equivalent for the terminal."""
+    try:
+        from gui_specs import (
+            BYTES_HEX,
+            BYTES_UTF8,
+            CHOICE,
+            INT,
+            MULTILINE,
+            SPECS,
+            TEXT,
+        )
+    except ImportError as exc:
+        print(_err(f"  Erreur : module gui_specs introuvable ({exc})"))
+        return
+
+    spec = SPECS.get(chemin)
+    if spec is None:
+        print()
+        print(_label(label))
+        print(_subtitle(
+            "Pas de saisie personnalisee pour ce module.\n"
+            "Choisissez 's' pour lancer le scenario pre-defini."
+        ))
+        return
+
+    print()
+    print(_label(label))
+    print(_subtitle("Renseignez les valeurs ci-dessous (Entree = defaut)."))
+    print(_divider())
+    print(_label("PARAMETRES"))
+
+    valeurs: dict = {}
+    for champ in spec.champs:
+        note = f" {_muted('- ' + champ.note)}" if champ.note else ""
+        defaut_aff = champ.defaut
+        if champ.type == CHOICE and champ.options:
+            note = f" {_muted('[' + '/'.join(champ.options) + ']')}" if not note else note
+        prompt = f"  {_accent(champ.label)}{note}\n    [{_muted(str(defaut_aff))}] > "
+        try:
+            saisie = input(prompt)
+        except EOFError:
+            print()
+            return
+
+        if saisie == "" and champ.defaut != "":
+            saisie = str(champ.defaut)
+
+        try:
+            if champ.type == TEXT:
+                valeurs[champ.cle] = saisie
+            elif champ.type == MULTILINE:
+                valeurs[champ.cle] = saisie
+            elif champ.type == BYTES_UTF8:
+                valeurs[champ.cle] = saisie.encode("utf-8")
+            elif champ.type == INT:
+                valeurs[champ.cle] = int(saisie or 0)
+            elif champ.type == BYTES_HEX:
+                txt = saisie.strip().replace(" ", "")
+                valeurs[champ.cle] = bytes.fromhex(txt) if txt else b""
+            elif champ.type == CHOICE:
+                if champ.options and saisie not in champ.options:
+                    saisie = champ.options[0]
+                valeurs[champ.cle] = saisie
+            else:
+                valeurs[champ.cle] = saisie
+        except ValueError as e:
+            print(_err(f"  [ERREUR ENTREE] {champ.label}: {e}"))
+            return
+
+    print()
+    print(_label("RESULTAT"))
+    print(_divider())
+    try:
+        res = spec.runner(valeurs)
+    except Exception as e:
+        print(_err(f"  [ERREUR EXECUTION] {type(e).__name__}: {e}"))
+        return
+    print(res)
+
+
+def _ouvrir_module(chemin: str, label: str) -> None:
+    print()
+    print(_label(label))
+    print(_subtitle("Comment veux-tu lancer ce module ?"))
+    print(f"  {_accent('s')}   Scenario pre-defini")
+    print(f"  {_accent('i')}   Tester avec mes valeurs")
+    print(f"  {_accent('q')}   Retour au menu")
+    try:
+        choix = input(f"\n  > ").strip().lower()
+    except EOFError:
+        print()
+        return
+    if choix in ("", "s", "scenario"):
+        _executer_scenario(chemin)
+    elif choix in ("i", "input", "valeurs"):
+        _formulaire_perso(chemin, label)
+    elif choix in ("q", "quit", "back"):
+        return
+    else:
+        print(_err(f"  Inconnu : {choix}"))
+
+
+def lancer(token):
+    cle = _resoudre(token)
+    if cle is None:
+        print(_err(f"  Inconnu : {token}"))
+        return
+    chemin, label = cle
+    # In non-interactive mode (CLI argument) keep scenario behaviour for back-compat.
+    if not sys.stdin.isatty():
+        _executer_scenario(chemin)
+        return
+    _ouvrir_module(chemin, label)
 
 
 def lancer_tout():
     for cle in MODULES:
-        lancer(cle)
+        chemin, _ = MODULES[cle]
+        _executer_scenario(chemin)
 
 
 def main():
@@ -122,13 +292,25 @@ def main():
         token = sys.argv[1].strip().lower()
         if token == "all":
             lancer_tout()
+        elif token in ("-h", "--help", "help"):
+            print("Usage: python main.py [<module> | all]")
+            print("  module : alias (e.g. 2.3) or theme.slug (e.g. symmetric.aes)")
         else:
-            lancer(token)
+            cle = _resoudre(token)
+            if cle is None:
+                print(_err(f"  Inconnu : {token}"))
+                return
+            _executer_scenario(cle[0])
         return
     while True:
         afficher_menu()
-        choix = input("\n  > ").strip().lower()
+        try:
+            choix = input(f"  {_accent('>')} ").strip().lower()
+        except EOFError:
+            print()
+            break
         if choix in ("q", "quit", "exit"):
+            print(_subtitle("  Au revoir."))
             break
         if choix == "all":
             lancer_tout()

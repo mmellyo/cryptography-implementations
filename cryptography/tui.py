@@ -1,9 +1,9 @@
 """Terminal UI for the cryptography demos (Textual).
 
-Two tabs per module:
-- 'Scenario' : runs the module's hard-coded demo() and streams stdout.
-- 'Tester avec mes valeurs' : interactive form built from gui_specs.SPECS,
-  same runners as the GUI so behaviour is identical.
+Mirrors the desktop GUI layout:
+- Brand block at the top, sidebar tree of modules on the left.
+- Right pane with two tabs : 'Tester avec mes valeurs' (default) and 'Scenario'.
+- Status bar at the bottom shows current activity ('Pret' / 'En cours...').
 """
 import asyncio
 import importlib
@@ -16,7 +16,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
     Footer,
-    Header,
     Input,
     Label,
     RichLog,
@@ -66,33 +65,35 @@ class FormulairePerso(VerticalScroll):
         self._inputs: dict = {}
 
     def compose(self) -> ComposeResult:
+        yield Static("Selectionnez un module", classes="form-titre center")
         yield Static(
-            "Selectionnez un module dans la barre laterale.",
-            id="form-vide",
-            classes="form-soustitre",
+            "Choisissez un algorithme dans la barre laterale pour le tester avec "
+            "vos propres valeurs.",
+            classes="form-soustitre center",
         )
 
     async def afficher_module(self, chemin: str, label: str) -> None:
         await self.remove_children()
         self._spec = SPECS.get(chemin)
         self._inputs = {}
+        await self.mount(Static(label, classes="form-titre"))
         if self._spec is None:
             await self.mount(
-                Static(label, classes="form-titre"),
                 Static(
                     "Pas de saisie personnalisee pour ce module.\n"
-                    "Appuyez sur 'r' pour lancer le scenario pre-defini.",
+                    "Lancez le scenario pre-defini (Ctrl+R ou Enter).",
                     classes="form-soustitre",
-                ),
+                )
             )
             return
-        await self.mount(Static(label, classes="form-titre"))
         await self.mount(
             Static(
-                "Renseignez les valeurs ci-dessous puis appuyez sur 'Lancer'.",
+                "Renseignez les valeurs ci-dessous puis lancez le calcul.",
                 classes="form-soustitre",
             )
         )
+        await self.mount(Static("", classes="divider"))
+        await self.mount(Static("PARAMETRES", classes="section-label"))
         for champ in self._spec.champs:
             label_text = champ.label
             if champ.note:
@@ -108,6 +109,7 @@ class FormulairePerso(VerticalScroll):
                 variant="primary",
             )
         )
+        await self.mount(Static("RESULTAT", classes="section-label"))
         await self.mount(Static("", id="resultat-perso", classes="form-resultat"))
 
     def _creer_widget(self, champ):
@@ -189,9 +191,21 @@ class CryptoTUI(App):
         background: #ffffff;
         color: #0f1e3a;
     }
-    Header {
+    #brand-bar {
         background: #003f91;
         color: #ffffff;
+        height: 3;
+        padding: 1 2;
+    }
+    #brand-title {
+        color: #ffffff;
+        text-style: bold;
+        width: 40;
+        content-align: left middle;
+    }
+    #brand-actions {
+        color: #ffffff;
+        content-align: right middle;
     }
     Footer {
         background: #003f91;
@@ -204,11 +218,11 @@ class CryptoTUI(App):
     #corps { height: 1fr; }
     #panneau-droit { width: 1fr; }
     Tree {
-        width: 40;
-        border: round #003f91;
+        width: 38;
+        border: none;
         background: #ffffff;
-        color: #003f91;
-        padding: 0 1;
+        color: #1e3a6b;
+        padding: 1 1;
     }
     Tree > .tree--cursor {
         background: #003f91;
@@ -216,40 +230,47 @@ class CryptoTUI(App):
         text-style: bold;
     }
     Tree > .tree--guides {
-        color: #5da9e9;
+        color: #c4cdd9;
     }
     Tree > .tree--label {
-        color: #003f91;
+        color: #1e3a6b;
     }
     Tree:focus > .tree--cursor {
         background: #003f91;
         color: #ffffff;
     }
     #etat {
-        background: #003f91;
-        color: #ffffff;
-        padding: 0 1;
+        background: #ffffff;
+        color: #5e6b80;
+        padding: 0 2;
         height: 1;
+        border-top: solid #d6dde6;
+    }
+    #etat.actif {
+        color: #003f91;
         text-style: bold;
     }
     TabbedContent {
         height: 1fr;
     }
     TabPane {
-        padding: 0 1;
+        padding: 0 0;
     }
     Tabs {
         background: #ffffff;
     }
     RichLog {
-        border: round #5da9e9;
-        background: #ffffff;
+        border: round #d6dde6;
+        background: #f3faf2;
         color: #0f1e3a;
-        padding: 0 1;
+        padding: 1 2;
+    }
+    #scenario-wrap {
+        padding: 1 3;
     }
     FormulairePerso {
         background: #ffffff;
-        padding: 1 2;
+        padding: 1 3;
     }
     .form-titre {
         color: #003f91;
@@ -261,15 +282,29 @@ class CryptoTUI(App):
         padding: 0 0 1 0;
     }
     .form-label {
+        color: #1e3a6b;
+        text-style: bold;
+        padding: 1 0 0 0;
+    }
+    .section-label {
         color: #003f91;
         text-style: bold;
         padding: 1 0 0 0;
     }
+    .divider {
+        background: #d6dde6;
+        height: 1;
+        margin: 1 0;
+    }
+    .center {
+        content-align: center middle;
+        text-align: center;
+    }
     .form-resultat {
         background: #f3faf2;
         color: #0f1e3a;
-        border: round #5da9e9;
-        padding: 1;
+        border: round #d6dde6;
+        padding: 1 2;
         margin-top: 1;
         height: auto;
     }
@@ -298,12 +333,13 @@ class CryptoTUI(App):
     }
     Button {
         background: #ffffff;
-        color: #003f91;
+        color: #1e3a6b;
         border: tall #c4cdd9;
     }
     Button:hover {
         background: #e5f4e3;
         border: tall #5da9e9;
+        color: #003f91;
     }
     Button.-primary {
         background: #003f91;
@@ -318,14 +354,20 @@ class CryptoTUI(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quitter"),
-        Binding("r", "run_courant", "Lancer"),
-        Binding("c", "clear_log", "Effacer"),
+        Binding("ctrl+r", "run_courant", "Lancer scenario"),
+        Binding("ctrl+l", "clear_log", "Effacer"),
+        Binding("r", "run_courant", "Lancer", show=False),
+        Binding("c", "clear_log", "Effacer", show=False),
         Binding("s", "tab_scenario", "Scenario"),
         Binding("i", "tab_perso", "Mes valeurs"),
     ]
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
+        with Horizontal(id="brand-bar"):
+            yield Static("Cryptography", id="brand-title")
+            yield Static(
+                "Ctrl+R Lancer scenario   Ctrl+L Effacer", id="brand-actions"
+            )
         with Horizontal(id="corps"):
             tree: Tree[str | None] = Tree("Modules", id="modules")
             tree.show_root = False
@@ -336,22 +378,30 @@ class CryptoTUI(App):
                         noeud.add_leaf(label, data=chemin)
             yield tree
             with Vertical(id="panneau-droit"):
-                yield Static(
-                    "Selectionne un module + Enter (ou r) pour le scenario, "
-                    "i pour 'Mes valeurs'.",
-                    id="etat",
-                )
-                with TabbedContent(id="onglets", initial="tab-scenario"):
-                    with TabPane("Scenario", id="tab-scenario"):
-                        yield RichLog(
-                            highlight=True,
-                            markup=True,
-                            wrap=False,
-                            max_lines=20000,
-                            id="sortie",
-                        )
+                with TabbedContent(id="onglets", initial="tab-perso"):
                     with TabPane("Tester avec mes valeurs", id="tab-perso"):
                         yield FormulairePerso(id="formulaire")
+                    with TabPane("Scenario", id="tab-scenario"):
+                        with Vertical(id="scenario-wrap"):
+                            yield Static(
+                                "Sortie du scenario",
+                                classes="form-titre",
+                            )
+                            yield Static(
+                                "Lancez le scenario pre-defini d'un module pour "
+                                "voir la sortie complete (Ctrl+R ou Enter dans "
+                                "la barre laterale).",
+                                classes="form-soustitre",
+                            )
+                            yield Static("", classes="divider")
+                            yield RichLog(
+                                highlight=True,
+                                markup=True,
+                                wrap=False,
+                                max_lines=20000,
+                                id="sortie",
+                            )
+                yield Static(" Pret", id="etat")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -365,7 +415,7 @@ class CryptoTUI(App):
                 form = self.query_one(FormulairePerso)
                 await form.afficher_module(chemin, label)
             except Exception as e:
-                self.query_one("#etat", Static).update(f"Erreur form: {e}")
+                self._set_etat(f" Erreur form: {e}", actif=False)
             self._lancer(chemin)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -379,7 +429,7 @@ class CryptoTUI(App):
 
     def action_clear_log(self) -> None:
         self.query_one("#sortie", RichLog).clear()
-        self.query_one("#etat", Static).update("Sortie effacee.")
+        self._set_etat(" Sortie effacee", actif=False)
 
     def action_tab_scenario(self) -> None:
         self.query_one(TabbedContent).active = "tab-scenario"
@@ -387,27 +437,34 @@ class CryptoTUI(App):
     def action_tab_perso(self) -> None:
         self.query_one(TabbedContent).active = "tab-perso"
 
+    def _set_etat(self, texte: str, actif: bool) -> None:
+        etat = self.query_one("#etat", Static)
+        etat.update(texte)
+        if actif:
+            etat.add_class("actif")
+        else:
+            etat.remove_class("actif")
+
     def _lancer(self, chemin: str) -> None:
         sortie = self.query_one("#sortie", RichLog)
-        etat = self.query_one("#etat", Static)
-        etat.update(f"Execution : {chemin}")
-        sortie.write(f"[bold #003f91]>>> {chemin}[/bold #003f91]")
+        self.query_one(TabbedContent).active = "tab-scenario"
+        self._set_etat(f" En cours : {chemin}", actif=True)
+        sortie.write(f"[bold #003f91]=== {chemin} ===[/bold #003f91]")
         self.run_worker(self._executer_async(chemin), exclusive=False, group="demo")
 
     async def _executer_async(self, chemin: str) -> None:
         sortie = self.query_one("#sortie", RichLog)
-        etat = self.query_one("#etat", Static)
         loop = asyncio.get_running_loop()
         try:
             buf = await loop.run_in_executor(None, _executer_demo, chemin)
         except Exception as e:
-            sortie.write(f"[red]Erreur : {type(e).__name__}: {e}[/red]")
-            etat.update(f"Erreur dans {chemin}")
+            sortie.write(f"[red][ERREUR] {type(e).__name__}: {e}[/red]")
+            self._set_etat(f" Erreur dans {chemin}", actif=False)
             return
         for line in buf.splitlines() or [""]:
             sortie.write(line)
         sortie.write("")
-        etat.update(f"Termine : {chemin}")
+        self._set_etat(" Pret", actif=False)
 
 
 def main() -> None:

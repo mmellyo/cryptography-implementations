@@ -16,6 +16,7 @@
 ## Installation
 
 ```sh
+# Clone
 cd crypto
 
 # Virtualenv (recommande)
@@ -111,26 +112,17 @@ modules without duplicating any cryptographic code.
 - **TP4 — Hashing** — MD5 (5-message pipeline + avalanche), SHA-256 from scratch (10 NIST vectors + file integrity), SHA-512 (cross-comparison + 100 MB benchmark), HMAC from scratch (RFC 4231 vectors)
 - **TP5 — Digital signatures** — RSA PKCS#1 v1.5 + PSS, ElGamal signature, DSA + ECDSA on P-256/384/521
 - **TP6 — Secure communications** — RSA-OAEP + AES-CTR + HMAC-SHA256 channel; TCP/IP server-client, UDP authenticated chat, Bluetooth RFCOMM transport (pluggable), homomorphic e-voting (additive ElGamal)
-- **Three front-ends** — CLI menu, Textual TUI (tree + scrollable log), PySide6 desktop GUI (toolbar + threaded workers)
+- **Three front-ends sharing the same UX** — CLI menu, Textual TUI, PySide6 desktop GUI. All three offer the **same two views per module** (pre-baked `Scenario` + `Tester avec mes valeurs` form) driven by a single `gui_specs.SPECS` table, and use the same Honeydew / Cool Sky / French Blue palette.
 - **118 tests** — `pytest` suite with NIST/RFC vectors, network round-trip, tampering rejection, vote tally
 - **Image visualisation** — PGM read/write helper (`common/pgm.py`) used by AES/DES to expose ECB pattern leakage
-
-### Planned
-
-- [ ] Add MARS finalist (no maintained Python reference yet)
-- [ ] DH groups RFC 7919 (`ffdhe2048`, `ffdhe3072`) instead of sympy primitive_root
-- [ ] Constant-time replacements for educational from-scratch modules
-- [ ] Streamlit web demo and remote `serve` mode
-
----
 
 ## Build Targets
 
 | Module | Entry point | Description |
 |--------|-------------|-------------|
-| `main` | `python main.py` | Text menu dispatching to module `demo()` |
-| `tui` | `python tui.py` | Textual TUI with module tree and live log |
-| `gui` | `python gui.py` | PySide6 desktop window with toolbar and dark output |
+| `main` | `python main.py` | Branded CLI menu — `Scenario` or interactive `Tester avec mes valeurs` |
+| `tui` | `python tui.py` | Textual TUI — sidebar tree + tabs (`Mes valeurs` / `Scenario`) + status bar |
+| `gui` | `python gui.py` | PySide6 desktop — branded toolbar, custom per-module panels, threaded workers |
 | `applications.tcp_secure` | `python -m applications.tcp_secure` | Standalone TCP secure echo server |
 | `applications.udp_chat` | `python -m applications.udp_chat` | Standalone UDP secure chat |
 | `applications.voting` | `python -m applications.voting` | Standalone homomorphic voting demo |
@@ -142,12 +134,24 @@ modules without duplicating any cryptographic code.
 ### CLI
 
 ```sh
-python main.py                       # interactive menu
-python main.py classical.caesar      # one demo by name
+python main.py                       # interactive menu (branded header, themed sections)
+python main.py classical.caesar      # one demo by name (non-interactive)
 python main.py 2.3                   # by course exercise alias
 python main.py all                   # run every demo sequentially
-python -m classical.caesar           # bypass the menu
+python main.py --help                # usage
+python -m classical.caesar           # bypass the menu entirely
 ```
+
+Interactive mode shows a French-Blue branded header and lists every module by
+theme. After picking one, you can choose:
+
+| Key | Action |
+|-----|--------|
+| `s` | run the pre-baked `Scenario` (`demo()` output) |
+| `i` | open the form (`Tester avec mes valeurs`) — same fields as GUI/TUI |
+| `q` | back to the menu |
+
+ANSI colors auto-disable when stdout is not a TTY, so piping/redirecting stays clean.
 
 ### TUI
 
@@ -155,7 +159,16 @@ python -m classical.caesar           # bypass the menu
 python tui.py
 ```
 
-Keyboard shortcuts: `r` run selected, `c` clear log, `a` run all, `q` quit.
+Layout mirrors the GUI: branded top bar, sidebar tree of modules, two right-side
+tabs (`Tester avec mes valeurs` default + `Scenario`), status bar at the bottom.
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+R` | Lancer scenario |
+| `Ctrl+L` | Effacer la sortie |
+| `i` / `s` | switch to `Mes valeurs` / `Scenario` tab |
+| `q` | Quitter |
+| `Enter` on a tree node | run that module |
 
 ### GUI
 
@@ -163,7 +176,11 @@ Keyboard shortcuts: `r` run selected, `c` clear log, `a` run all, `q` quit.
 python gui.py
 ```
 
-Toolbar: `Lancer` (Ctrl+R), `Toutes les demos`, `Effacer` (Ctrl+L). Output area uses a dark monospace theme; long demos run in a `QThread` to keep the UI responsive.
+Branded toolbar in French Blue with `Lancer scenario` (Ctrl+R) and `Effacer`
+(Ctrl+L). Default tab is `Tester avec mes valeurs` (interactive form or custom
+panel — symmetric/asymmetric encrypt-decrypt, hash, signatures, network chats,
+e-voting). Status bar shows `Pret` / `En cours` with a progress indicator while
+the demo runs in a `QThread`.
 
 ### Direct API
 
@@ -253,9 +270,13 @@ total = decompter(p, g, x, ballots, max_votants=5)  # -> 3
 
 ```
 crypto/
-├── main.py                       # CLI menu and dispatcher
-├── tui.py                        # Textual TUI
+├── main.py                       # CLI menu + interactive form mode
+├── tui.py                        # Textual TUI (mirrors GUI layout)
 ├── gui.py                        # PySide6 desktop GUI
+├── gui_specs.py                  # Shared form descriptors + runners (used by CLI/TUI/GUI)
+├── gui_widgets.py                # Reusable Qt widgets (FormatField, LabeledDropdown, ...)
+├── gui_panels.py                 # Per-algorithm Qt panels (symmetric, asymmetric, hash, sig)
+├── gui_apps.py                   # Application panels (TCP/UDP/Bluetooth chat, voting)
 ├── requirements.txt
 ├── pyproject.toml                # pytest configuration
 ├── classical/                    # TP1

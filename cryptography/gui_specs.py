@@ -195,13 +195,32 @@ def _run_rsa(v):
     except Exception as e:
         return f"Erreur chiffrement : {e}\n(message peut-etre trop long pour la cle)"
     dechiffre = rsa_mod.dechiffrer(priv, chiffre)
+
+    pub_nums = pub.public_numbers()
+    priv_nums = priv.private_numbers()
+
+    def court(n: int, lim: int = 80) -> str:
+        s = hex(n)
+        return s if len(s) <= lim else s[:lim] + "..."
+
     hex_c = chiffre.hex()
-    return (f"Taille cle    : {bits} bits\n"
-            f"Message       : {msg!r}\n"
-            f"Longueur c    : {len(chiffre)} octets\n"
-            f"Chiffre (hex) : {hex_c[:80]}{'...' if len(hex_c) > 80 else ''}\n"
-            f"Dechiffre     : {dechiffre!r}\n"
-            f"Match         : {dechiffre == msg}")
+    return (
+        f"=== Parametres ===\n"
+        f"Taille cle    : {bits} bits\n"
+        f"\n=== Cle publique (n, e) ===\n"
+        f"n (hex)       : {court(pub_nums.n)}\n"
+        f"e             : {pub_nums.e}\n"
+        f"\n=== Cle privee (d, p, q) ===\n"
+        f"d (hex)       : {court(priv_nums.d)}\n"
+        f"p (hex)       : {court(priv_nums.p, 60)}\n"
+        f"q (hex)       : {court(priv_nums.q, 60)}\n"
+        f"\n=== Chiffrement RSA-OAEP ===\n"
+        f"Message       : {msg!r}\n"
+        f"Longueur c    : {len(chiffre)} octets\n"
+        f"Chiffre (hex) : {hex_c[:80]}{'...' if len(hex_c) > 80 else ''}\n"
+        f"Dechiffre     : {dechiffre!r}\n"
+        f"Match         : {dechiffre == msg}"
+    )
 
 
 def _run_dh(v):
@@ -245,12 +264,22 @@ def _run_elgamal(v):
         s = hex(n)
         return s if len(s) <= 60 else s[:60] + "..."
 
-    return (f"Taille p   : {bits} bits\n"
-            f"M (clair)  : {M}\n"
-            f"c1         : {court(c1)}\n"
-            f"c2         : {court(c2)}\n"
-            f"Dechiffre  : {M_d}\n"
-            f"Match      : {M_d == M}")
+    return (
+        f"=== Parametres ===\n"
+        f"Taille p   : {bits} bits\n"
+        f"\n=== Cle publique (p, g, y) ===\n"
+        f"p          : {court(p)}\n"
+        f"g          : {g}\n"
+        f"y = g^x    : {court(y)}\n"
+        f"\n=== Cle privee (x) ===\n"
+        f"x          : {court(x)}\n"
+        f"\n=== Chiffrement ElGamal ===\n"
+        f"M (clair)  : {M}\n"
+        f"c1 = g^k   : {court(c1)}\n"
+        f"c2 = M*y^k : {court(c2)}\n"
+        f"Dechiffre  : {M_d}\n"
+        f"Match      : {M_d == M}"
+    )
 
 
 def _run_rsa_signature(v):
@@ -265,13 +294,33 @@ def _run_rsa_signature(v):
         sig = rsa_signature.signer_pss(priv, msg)
         ok = rsa_signature.verifier_pss(pub, msg, sig)
         ok_alt = rsa_signature.verifier_pss(pub, msg + b"x", sig)
+
+    pub_nums = pub.public_numbers()
+    priv_nums = priv.private_numbers()
+
+    def court(n: int, lim: int = 80) -> str:
+        s = hex(n)
+        return s if len(s) <= lim else s[:lim] + "..."
+
     hex_s = sig.hex()
-    return (f"Schema           : {schema}\n"
-            f"Message          : {msg!r}\n"
-            f"Signature        : {len(sig)} octets\n"
-            f"Signature (hex)  : {hex_s[:80]}{'...' if len(hex_s) > 80 else ''}\n"
-            f"Verif (legitime) : {ok}\n"
-            f"Verif (modifie)  : {ok_alt}")
+    return (
+        f"=== Parametres ===\n"
+        f"Schema           : {schema}\n"
+        f"Taille cle       : {bits} bits\n"
+        f"\n=== Cle publique (n, e) ===\n"
+        f"n (hex)          : {court(pub_nums.n)}\n"
+        f"e                : {pub_nums.e}\n"
+        f"\n=== Cle privee (d, p, q) ===\n"
+        f"d (hex)          : {court(priv_nums.d)}\n"
+        f"p (hex)          : {court(priv_nums.p, 60)}\n"
+        f"q (hex)          : {court(priv_nums.q, 60)}\n"
+        f"\n=== Signature ===\n"
+        f"Message          : {msg!r}\n"
+        f"Signature        : {len(sig)} octets\n"
+        f"Signature (hex)  : {hex_s[:80]}{'...' if len(hex_s) > 80 else ''}\n"
+        f"Verif (legitime) : {ok}\n"
+        f"Verif (modifie)  : {ok_alt}"
+    )
 
 
 def _run_dsa_ecdsa(v):
@@ -279,22 +328,56 @@ def _run_dsa_ecdsa(v):
     msg, algo = v["message"], v["algo"]
     try:
         if algo == "DSA":
-            _, pub, sig = dsa_ecdsa.signer_dsa(msg)
+            priv, pub, sig = dsa_ecdsa.signer_dsa(msg)
             ok = dsa_ecdsa.verifier_dsa(pub, msg, sig)
             ok_alt = dsa_ecdsa.verifier_dsa(pub, msg + b"x", sig)
         else:
-            _, pub, sig = dsa_ecdsa.signer_ecdsa(msg, algo)
+            priv, pub, sig = dsa_ecdsa.signer_ecdsa(msg, algo)
             ok = dsa_ecdsa.verifier_ecdsa(pub, msg, sig)
             ok_alt = dsa_ecdsa.verifier_ecdsa(pub, msg + b"x", sig)
     except ValueError as e:
         return f"Erreur : {e}"
+
+    def court(n: int, lim: int = 80) -> str:
+        s = hex(n)
+        return s if len(s) <= lim else s[:lim] + "..."
+
+    if algo == "DSA":
+        params = pub.parameters().parameter_numbers()
+        pub_nums = pub.public_numbers()
+        priv_nums = priv.private_numbers()
+        cles_str = (
+            f"\n=== Parametres DSA (p, q, g) ===\n"
+            f"p (hex)          : {court(params.p)}\n"
+            f"q (hex)          : {court(params.q, 60)}\n"
+            f"g (hex)          : {court(params.g)}\n"
+            f"\n=== Cle publique y = g^x mod p ===\n"
+            f"y (hex)          : {court(pub_nums.y)}\n"
+            f"\n=== Cle privee x ===\n"
+            f"x (hex)          : {court(priv_nums.x, 60)}\n"
+        )
+    else:
+        pub_nums = pub.public_numbers()
+        priv_nums = priv.private_numbers()
+        cles_str = (
+            f"\n=== Cle publique (point sur courbe {algo}) ===\n"
+            f"x (hex)          : {court(pub_nums.x, 70)}\n"
+            f"y (hex)          : {court(pub_nums.y, 70)}\n"
+            f"\n=== Cle privee (scalaire d) ===\n"
+            f"d (hex)          : {court(priv_nums.private_value, 70)}\n"
+        )
+
     hex_s = sig.hex()
-    return (f"Algo             : {algo}\n"
-            f"Message          : {msg!r}\n"
-            f"Signature        : {len(sig)} octets\n"
-            f"Signature (hex)  : {hex_s[:80]}{'...' if len(hex_s) > 80 else ''}\n"
-            f"Verif (legitime) : {ok}\n"
-            f"Verif (modifie)  : {ok_alt}")
+    return (
+        f"=== Algo : {algo} ==="
+        f"{cles_str}"
+        f"\n=== Signature ===\n"
+        f"Message          : {msg!r}\n"
+        f"Signature        : {len(sig)} octets\n"
+        f"Signature (hex)  : {hex_s[:80]}{'...' if len(hex_s) > 80 else ''}\n"
+        f"Verif (legitime) : {ok}\n"
+        f"Verif (modifie)  : {ok_alt}"
+    )
 
 
 def _run_elgamal_sig(v):
@@ -309,12 +392,22 @@ def _run_elgamal_sig(v):
         h = hex(n)
         return h if len(h) <= 60 else h[:60] + "..."
 
-    return (f"Taille p         : {bits} bits\n"
-            f"Message          : {msg!r}\n"
-            f"r                : {court(r)}\n"
-            f"s                : {court(s)}\n"
-            f"Verif (legitime) : {ok}\n"
-            f"Verif (modifie)  : {ok_alt}")
+    return (
+        f"=== Parametres ===\n"
+        f"Taille p         : {bits} bits\n"
+        f"\n=== Cle publique (p, g, y) ===\n"
+        f"p                : {court(p)}\n"
+        f"g                : {g}\n"
+        f"y = g^x          : {court(y)}\n"
+        f"\n=== Cle privee (x) ===\n"
+        f"x                : {court(x)}\n"
+        f"\n=== Signature ElGamal ===\n"
+        f"Message          : {msg!r}\n"
+        f"r                : {court(r)}\n"
+        f"s                : {court(s)}\n"
+        f"Verif (legitime) : {ok}\n"
+        f"Verif (modifie)  : {ok_alt}"
+    )
 
 
 # -- Specs ----------------------------------------------------------------

@@ -104,6 +104,20 @@ class _ChatColonne(QWidget):
         input_row.addWidget(self._input, 1)
         self._send = QPushButton("Envoyer")
         self._send.setProperty("primary", True)
+        self._send.setMinimumWidth(96)
+        # Force the primary style explicitly so it stays visible regardless of
+        # how the global QPushButton cascade evolves.
+        self._send.setStyleSheet(
+            "QPushButton {"
+            "  background-color: #003f91; color: #ffffff;"
+            "  border: 1px solid #003f91; border-radius: 6px;"
+            "  padding: 8px 18px; font-weight: 600;"
+            "}"
+            "QPushButton:hover { background-color: #5da9e9; border-color: #5da9e9; }"
+            "QPushButton:pressed { background-color: #002a66; }"
+            "QPushButton:disabled { background-color: #b8c8e3; color: #ffffff;"
+            " border-color: #b8c8e3; }"
+        )
         self._send.setEnabled(False)
         input_row.addWidget(self._send)
         outer.addLayout(input_row)
@@ -139,16 +153,19 @@ class _ChatColonne(QWidget):
         bulle = QLabel(texte)
         bulle.setWordWrap(True)
         bulle.setMaximumWidth(420)
+        bulle.setMinimumWidth(60)
         bulle.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         if sortant:
             bulle.setStyleSheet(
                 f"background-color: {self.accent}; color: white; "
-                "padding: 8px 12px; border-radius: 12px; font-size: 13px;"
+                "padding: 8px 14px; border-radius: 12px; font-size: 13px;"
+                " min-height: 18px;"
             )
         else:
             bulle.setStyleSheet(
                 "background-color: #e5f4e3; color: #0f1e3a; "
-                "padding: 8px 12px; border-radius: 12px; font-size: 13px;"
+                "padding: 8px 14px; border-radius: 12px; font-size: 13px;"
+                " min-height: 18px;"
             )
         ligne = QHBoxLayout()
         ligne.setContentsMargins(0, 0, 0, 0)
@@ -422,6 +439,306 @@ class TcpChatPanel(QWidget):
     def _sur_journal(self, msg):
         self._col_client.ajouter_systeme(msg)
         self._col_serveur.ajouter_systeme(msg)
+
+
+# ---------------------------------------------------------------------------
+# Bluetooth secure chat: same SecureChannel protocol as TCP, but transported
+# over BLE GATT (bleak central + bless peripheral). The Serveur column runs
+# the peripheral role (advertises the service) ; the Client column runs the
+# central role (scans and connects by advertised name). Cross-platform :
+# Linux <-> macOS works because BLE is supported natively on both.
+# ---------------------------------------------------------------------------
+
+class BluetoothChatPanel(QWidget):
+    """Bluetooth secure chat with Serveur and Client columns side-by-side.
+
+    Each column is fully independent : own connection, own SecureChannel,
+    own chat. Typically you run one side here and the other on a remote
+    paired device (Mac native or another Linux box)."""
+
+    description = (
+        "Session Bluetooth (RFCOMM) avec handshake RSA-OAEP + chiffrement "
+        "AES-CTR + HMAC-SHA256. Necessite Bluetooth et une carte BLE."
+    )
+
+    sig_recu_serveur = Signal(str)
+    sig_recu_client = Signal(str)
+    sig_etat_serveur = Signal(str)
+    sig_etat_client = Signal(str)
+    sig_journal_serveur = Signal(str)
+    sig_journal_client = Signal(str)
+    sig_pret_serveur = Signal()
+    sig_pret_client = Signal()
+    sig_arrete_serveur = Signal()
+    sig_arrete_client = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._stop_serveur = threading.Event()
+        self._stop_client = threading.Event()
+        self._transport_serveur = None
+        self._transport_client = None
+        self._canal_serveur = None
+        self._canal_client = None
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        info = QLabel(self.description)
+        info.setProperty("role", "subtitle")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        from applications import ble_secure as ble_mod
+        self._ble_mod = ble_mod
+        self._central_ok = ble_mod.disponible_central()
+        self._peripheral_ok = ble_mod.disponible_peripheral()
+
+        if not (self._central_ok and self._peripheral_ok):
+            manquant = []
+            if not self._central_ok:
+                manquant.append("bleak (client)")
+            if not self._peripheral_ok:
+                manquant.append("bless (serveur)")
+            warning = QLabel(
+                "Dependances Bluetooth manquantes : "
+                + ", ".join(manquant)
+                + ". Installer : 'pip install bleak bless'. Une carte "
+                "Bluetooth est requise sur les deux machines."
+            )
+            warning.setWordWrap(True)
+            warning.setStyleSheet(
+                "background-color: #fee2e2; color: #991b1b; padding: 12px;"
+                " border-radius: 6px; font-weight: 600;"
+            )
+            layout.addWidget(warning)
+
+        # Shared service name (used both as advertise name + scan filter)
+        params = QHBoxLayout()
+        params.setSpacing(8)
+        params.addWidget(QLabel("Nom du service :"))
+        self._nom = QLineEdit("SecureChannelBLE")
+        self._nom.setMinimumWidth(220)
+        params.addWidget(self._nom)
+        params.addStretch(1)
+        layout.addLayout(params)
+
+        cols = QHBoxLayout()
+        cols.setSpacing(14)
+
+        # ----- Serveur (peripheral) -----
+        serveur_box = QVBoxLayout()
+        serveur_ctl = QHBoxLayout()
+        self._b_start_s = QPushButton("Demarrer le serveur")
+        self._b_start_s.setProperty("primary", True)
+        self._b_start_s.clicked.connect(self._demarrer_serveur)
+        serveur_ctl.addWidget(self._b_start_s)
+        self._b_stop_s = QPushButton("Arreter")
+        self._b_stop_s.setProperty("danger", True)
+        self._b_stop_s.setEnabled(False)
+        self._b_stop_s.clicked.connect(self._arreter_serveur)
+        serveur_ctl.addWidget(self._b_stop_s)
+        serveur_ctl.addStretch(1)
+        self._lbl_etat_s = QLabel("Inactif")
+        self._lbl_etat_s.setProperty("role", "subtitle")
+        serveur_ctl.addWidget(self._lbl_etat_s)
+        serveur_box.addLayout(serveur_ctl)
+        self._col_serveur = _ChatColonne("Serveur", accent="#003f91")
+        self._col_serveur.connecter_envoi(self._envoyer_serveur)
+        self._col_serveur.activer(False)
+        serveur_box.addWidget(self._col_serveur, 1)
+        serveur_widget = QWidget()
+        serveur_widget.setLayout(serveur_box)
+        cols.addWidget(serveur_widget, 1)
+
+        # ----- Client (central) -----
+        client_box = QVBoxLayout()
+        client_ctl = QHBoxLayout()
+        self._b_start_c = QPushButton("Connecter le client")
+        self._b_start_c.setProperty("primary", True)
+        self._b_start_c.clicked.connect(self._demarrer_client)
+        client_ctl.addWidget(self._b_start_c)
+        self._b_stop_c = QPushButton("Arreter")
+        self._b_stop_c.setProperty("danger", True)
+        self._b_stop_c.setEnabled(False)
+        self._b_stop_c.clicked.connect(self._arreter_client)
+        client_ctl.addWidget(self._b_stop_c)
+        client_ctl.addStretch(1)
+        self._lbl_etat_c = QLabel("Inactif")
+        self._lbl_etat_c.setProperty("role", "subtitle")
+        client_ctl.addWidget(self._lbl_etat_c)
+        client_box.addLayout(client_ctl)
+        self._col_client = _ChatColonne("Client", accent="#5da9e9")
+        self._col_client.connecter_envoi(self._envoyer_client)
+        self._col_client.activer(False)
+        client_box.addWidget(self._col_client, 1)
+        client_widget = QWidget()
+        client_widget.setLayout(client_box)
+        cols.addWidget(client_widget, 1)
+
+        layout.addLayout(cols, 1)
+
+        if not self._peripheral_ok:
+            self._b_start_s.setEnabled(False)
+        if not self._central_ok:
+            self._b_start_c.setEnabled(False)
+
+        # Wire signals to UI thread
+        self.sig_recu_serveur.connect(
+            lambda t: self._col_serveur.ajouter_message(t, sortant=False)
+        )
+        self.sig_recu_client.connect(
+            lambda t: self._col_client.ajouter_message(t, sortant=False)
+        )
+        self.sig_etat_serveur.connect(self._lbl_etat_s.setText)
+        self.sig_etat_client.connect(self._lbl_etat_c.setText)
+        self.sig_journal_serveur.connect(self._col_serveur.ajouter_systeme)
+        self.sig_journal_client.connect(self._col_client.ajouter_systeme)
+        self.sig_pret_serveur.connect(lambda: self._col_serveur.activer(True))
+        self.sig_pret_client.connect(lambda: self._col_client.activer(True))
+        self.sig_arrete_serveur.connect(self._sur_arrete_serveur)
+        self.sig_arrete_client.connect(self._sur_arrete_client)
+
+    # -- Serveur (peripheral) -------------------------------------------------
+
+    def _demarrer_serveur(self):
+        if not self._peripheral_ok:
+            return
+        self._stop_serveur = threading.Event()
+        self._b_start_s.setEnabled(False)
+        self._b_stop_s.setEnabled(True)
+        self._col_serveur.vider()
+        self.sig_etat_serveur.emit("Advertise + attente central...")
+        threading.Thread(target=self._run_server, daemon=True).start()
+
+    def _run_server(self):
+        try:
+            nom = self._nom.text().strip() or "SecureChannelBLE"
+            self.sig_journal_serveur.emit(
+                f"Advertise GATT 'SecureChannelBLE' (nom={nom})"
+            )
+            transport = self._ble_mod.serveur_ble(nom)
+            self._transport_serveur = transport
+            self.sig_journal_serveur.emit("Central connecte. Handshake en cours...")
+            canal, _ = self._ble_mod.accepter(transport)
+            self._canal_serveur = canal
+            self.sig_journal_serveur.emit("Handshake OK.")
+            self.sig_etat_serveur.emit("Connecte")
+            self.sig_pret_serveur.emit()
+            self._lire_serveur()
+        except Exception as e:
+            self.sig_journal_serveur.emit(f"[peripheral] {type(e).__name__}: {e}")
+            self.sig_etat_serveur.emit("Erreur")
+            self.sig_arrete_serveur.emit()
+
+    def _lire_serveur(self):
+        while not self._stop_serveur.is_set() and self._canal_serveur is not None:
+            try:
+                data = self._canal_serveur.recevoir()
+            except (ConnectionError, ValueError, OSError):
+                return
+            except Exception as e:
+                self.sig_journal_serveur.emit(f"[reader] {type(e).__name__}: {e}")
+                return
+            self.sig_recu_serveur.emit(data.decode("utf-8", errors="replace"))
+
+    def _envoyer_serveur(self):
+        if self._canal_serveur is None:
+            return
+        texte = self._col_serveur.texte_input()
+        if not texte:
+            return
+        try:
+            self._canal_serveur.envoyer(texte.encode("utf-8"))
+            self._col_serveur.ajouter_message(texte, sortant=True)
+            self._col_serveur.vider_input()
+        except Exception as e:
+            self.sig_journal_serveur.emit(f"[send] {type(e).__name__}: {e}")
+
+    def _arreter_serveur(self):
+        self._stop_serveur.set()
+        try:
+            if self._transport_serveur is not None:
+                self._transport_serveur.close()
+        except Exception:
+            pass
+        self._transport_serveur = None
+        self._canal_serveur = None
+        self.sig_arrete_serveur.emit()
+
+    def _sur_arrete_serveur(self):
+        self._col_serveur.activer(False)
+        self._b_start_s.setEnabled(self._peripheral_ok)
+        self._b_stop_s.setEnabled(False)
+        self._lbl_etat_s.setText("Inactif")
+
+    # -- Client (central) -----------------------------------------------------
+
+    def _demarrer_client(self):
+        if not self._central_ok:
+            return
+        self._stop_client = threading.Event()
+        self._b_start_c.setEnabled(False)
+        self._b_stop_c.setEnabled(True)
+        self._col_client.vider()
+        nom = self._nom.text().strip() or "SecureChannelBLE"
+        self.sig_etat_client.emit(f"Scan BLE pour '{nom}'...")
+        threading.Thread(target=self._run_client, args=(nom,), daemon=True).start()
+
+    def _run_client(self, nom: str):
+        try:
+            canal, transport = self._ble_mod.client_ble(nom, timeout_scan=30.0)
+            self._transport_client = transport
+            self._canal_client = canal
+            self.sig_journal_client.emit(f"Connecte a '{nom}' + handshake OK")
+            self.sig_etat_client.emit("Connecte")
+            self.sig_pret_client.emit()
+            self._lire_client()
+        except Exception as e:
+            self.sig_journal_client.emit(f"[central] {type(e).__name__}: {e}")
+            self.sig_etat_client.emit("Erreur")
+            self.sig_arrete_client.emit()
+
+    def _lire_client(self):
+        while not self._stop_client.is_set() and self._canal_client is not None:
+            try:
+                data = self._canal_client.recevoir()
+            except (ConnectionError, ValueError, OSError):
+                return
+            except Exception as e:
+                self.sig_journal_client.emit(f"[reader] {type(e).__name__}: {e}")
+                return
+            self.sig_recu_client.emit(data.decode("utf-8", errors="replace"))
+
+    def _envoyer_client(self):
+        if self._canal_client is None:
+            return
+        texte = self._col_client.texte_input()
+        if not texte:
+            return
+        try:
+            self._canal_client.envoyer(texte.encode("utf-8"))
+            self._col_client.ajouter_message(texte, sortant=True)
+            self._col_client.vider_input()
+        except Exception as e:
+            self.sig_journal_client.emit(f"[send] {type(e).__name__}: {e}")
+
+    def _arreter_client(self):
+        self._stop_client.set()
+        try:
+            if self._transport_client is not None:
+                self._transport_client.close()
+        except Exception:
+            pass
+        self._transport_client = None
+        self._canal_client = None
+        self.sig_arrete_client.emit()
+
+    def _sur_arrete_client(self):
+        self._col_client.activer(False)
+        self._b_start_c.setEnabled(self._central_ok)
+        self._b_stop_c.setEnabled(False)
+        self._lbl_etat_c.setText("Inactif")
 
 
 # ---------------------------------------------------------------------------
