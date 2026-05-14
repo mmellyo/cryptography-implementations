@@ -17,6 +17,7 @@
 
 ```sh
 # Clone
+git clone https://github.com/Adel-Ayoub/crypto.git
 cd crypto
 
 # Virtualenv (recommande)

@@ -186,15 +186,29 @@ def _run_hmac(v):
 def _run_rsa(v):
     from asymmetric import rsa as rsa_mod
     msg, bits = v["message"], int(v["bits"])
+    mode = v.get("mode", "OAEP")
     try:
         priv, pub = rsa_mod.generer_cles(bits)
     except ValueError as e:
         return f"Erreur : {e}"
+    limite = rsa_mod.taille_max_oaep(bits)
+    if mode == "OAEP" and len(msg) > limite:
+        return (
+            f"Erreur : message {len(msg)} octets > limite OAEP-SHA256 "
+            f"({limite} octets pour RSA-{bits}).\n"
+            f"Choisissez le mode 'Hybride' pour chiffrer du texte long."
+        )
     try:
-        chiffre = rsa_mod.chiffrer(pub, msg)
+        if mode == "Hybride":
+            chiffre = rsa_mod.chiffrer_hybride(pub, msg)
+            dechiffre = rsa_mod.dechiffrer_hybride(priv, chiffre)
+            schema = f"RSA-OAEP + AES-256-GCM"
+        else:
+            chiffre = rsa_mod.chiffrer(pub, msg)
+            dechiffre = rsa_mod.dechiffrer(priv, chiffre)
+            schema = "RSA-OAEP-SHA256"
     except Exception as e:
-        return f"Erreur chiffrement : {e}\n(message peut-etre trop long pour la cle)"
-    dechiffre = rsa_mod.dechiffrer(priv, chiffre)
+        return f"Erreur chiffrement : {e}"
 
     pub_nums = pub.public_numbers()
     priv_nums = priv.private_numbers()
@@ -206,20 +220,22 @@ def _run_rsa(v):
     hex_c = chiffre.hex()
     return (
         f"=== Parametres ===\n"
-        f"Taille cle    : {bits} bits\n"
+        f"Taille cle     : {bits} bits\n"
+        f"Schema         : {schema}\n"
+        f"Limite OAEP    : {limite} octets (par appel)\n"
         f"\n=== Cle publique (n, e) ===\n"
-        f"n (hex)       : {court(pub_nums.n)}\n"
-        f"e             : {pub_nums.e}\n"
+        f"n (hex)        : {court(pub_nums.n)}\n"
+        f"e              : {pub_nums.e}\n"
         f"\n=== Cle privee (d, p, q) ===\n"
-        f"d (hex)       : {court(priv_nums.d)}\n"
-        f"p (hex)       : {court(priv_nums.p, 60)}\n"
-        f"q (hex)       : {court(priv_nums.q, 60)}\n"
-        f"\n=== Chiffrement RSA-OAEP ===\n"
-        f"Message       : {msg!r}\n"
-        f"Longueur c    : {len(chiffre)} octets\n"
-        f"Chiffre (hex) : {hex_c[:80]}{'...' if len(hex_c) > 80 else ''}\n"
-        f"Dechiffre     : {dechiffre!r}\n"
-        f"Match         : {dechiffre == msg}"
+        f"d (hex)        : {court(priv_nums.d)}\n"
+        f"p (hex)        : {court(priv_nums.p, 60)}\n"
+        f"q (hex)        : {court(priv_nums.q, 60)}\n"
+        f"\n=== Chiffrement {schema} ===\n"
+        f"Message ({len(msg)} o) : {msg!r}\n"
+        f"Longueur c     : {len(chiffre)} octets\n"
+        f"Chiffre (hex)  : {hex_c[:80]}{'...' if len(hex_c) > 80 else ''}\n"
+        f"Dechiffre      : {dechiffre!r}\n"
+        f"Match          : {dechiffre == msg}"
     )
 
 
@@ -483,6 +499,8 @@ SPECS = {
         champs=[
             Champ("message", "Message", BYTES_UTF8, "Message via RSA"),
             Champ("bits", "Taille cle", CHOICE, "2048", options=["512", "1024", "2048", "3072", "4096"]),
+            Champ("mode", "Mode", CHOICE, "OAEP", options=["OAEP", "Hybride"],
+                  note="OAEP : court (<= taille/8-66 o). Hybride : long texte (RSA + AES-GCM)."),
         ],
         runner=_run_rsa,
     ),
@@ -517,8 +535,8 @@ SPECS = {
     "signatures.elgamal_sig": Spec(
         champs=[
             Champ("message", "Message a signer", BYTES_UTF8, "Document a signer"),
-            Champ("bits", "Taille p (bits)", INT, 256, minimum=64, maximum=1024,
-                  note="64+ pour la demo, 512+ en production"),
+            Champ("bits", "Taille p (bits)", INT, 512, minimum=512, maximum=2048,
+                  note="512 mini (OpenSSL safe prime)"),
         ],
         runner=_run_elgamal_sig,
     ),

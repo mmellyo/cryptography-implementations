@@ -830,16 +830,50 @@ class KeyExchangePanel(QWidget):
         return widgets
 
     def _run_exchange(self):
-        try:
-            def short(n):
-                h = hex(n) if isinstance(n, int) else str(n)
-                return h if len(h) <= 80 else h[:80] + "..."
+        # Run the actual work off the UI thread: parameter generation can take
+        # a couple of seconds at 2048 bits (and longer at 3072+), which would
+        # otherwise freeze the window.
+        self.match_label.setText("Secret partage : generation en cours...")
+        self.match_label.setStyleSheet(
+            "font-size: 14px; font-weight: 600; padding: 8px;"
+            " background: #fef3c7; color: #92400e; border-radius: 4px;"
+        )
+        for party in (self.alice, self.bob):
+            party["priv"].setPlainText("...")
+            party["pub"].setPlainText("...")
+            party["shared"].setPlainText("...")
 
-            if self.algo == "DH":
+        if self.algo == "DH":
+            bits = int(self.bits_dd.value())
+
+            def work():
                 from asymmetric import diffie_hellman as dh
-                bits = int(self.bits_dd.value())
                 p, g = dh.generer_p_g(bits)
                 a, b, A, B, Ka, Kb = dh.echange(p, g)
+                return ("DH", p, g, a, b, A, B, Ka, Kb)
+        else:
+            curve_name = self.curve_dd.value()
+
+            def work():
+                from cryptography.hazmat.primitives.asymmetric import ec
+                curves = {"P-256": ec.SECP256R1(), "P-384": ec.SECP384R1(),
+                          "P-521": ec.SECP521R1()}
+                curve = curves[curve_name]
+                sk_a = ec.generate_private_key(curve)
+                sk_b = ec.generate_private_key(curve)
+                pk_a = sk_a.public_key()
+                pk_b = sk_b.public_key()
+                shared_a = sk_a.exchange(ec.ECDH(), pk_b)
+                shared_b = sk_b.exchange(ec.ECDH(), pk_a)
+                return ("ECDH", sk_a, sk_b, pk_a, pk_b, shared_a, shared_b)
+
+        def short(n):
+            h = hex(n) if isinstance(n, int) else str(n)
+            return h if len(h) <= 80 else h[:80] + "..."
+
+        def on_done(result):
+            if result[0] == "DH":
+                _, p, g, a, b, A, B, Ka, Kb = result
                 self.alice["priv"].setPlainText(f"a = {short(a)}")
                 self.alice["pub"].setPlainText(f"A = g^a mod p = {short(A)}")
                 self.alice["shared"].setPlainText(f"Ka = B^a mod p = {short(Ka)}")
@@ -848,17 +882,7 @@ class KeyExchangePanel(QWidget):
                 self.bob["shared"].setPlainText(f"Kb = A^b mod p = {short(Kb)}")
                 ok = (Ka == Kb)
             else:
-                from cryptography.hazmat.primitives.asymmetric import ec
-                curves = {"P-256": ec.SECP256R1(), "P-384": ec.SECP384R1(),
-                          "P-521": ec.SECP521R1()}
-                curve = curves[self.curve_dd.value()]
-                sk_a = ec.generate_private_key(curve)
-                sk_b = ec.generate_private_key(curve)
-                pk_a = sk_a.public_key()
-                pk_b = sk_b.public_key()
-                shared_a = sk_a.exchange(ec.ECDH(), pk_b)
-                shared_b = sk_b.exchange(ec.ECDH(), pk_a)
-
+                _, sk_a, sk_b, pk_a, pk_b, shared_a, shared_b = result
                 da = sk_a.private_numbers().private_value
                 db = sk_b.private_numbers().private_value
                 pa = pk_a.public_numbers()
@@ -887,8 +911,16 @@ class KeyExchangePanel(QWidget):
                     "font-size: 14px; font-weight: 600; padding: 8px;"
                     " background: #fee2e2; color: #991b1b; border-radius: 4px;"
                 )
-        except Exception as e:
-            self._error("Erreur echange", str(e))
+
+        def on_failed(msg):
+            self.match_label.setText("Secret partage : ERREUR")
+            self.match_label.setStyleSheet(
+                "font-size: 14px; font-weight: 600; padding: 8px;"
+                " background: #fee2e2; color: #991b1b; border-radius: 4px;"
+            )
+            self._error("Erreur echange", msg)
+
+        run_async(self, work, on_done, on_failed)
 
     def _error(self, title: str, msg: str):
         box = QMessageBox(self)
@@ -1363,6 +1395,21 @@ class AsymmetricEncryptPanel(QWidget):
         )
         side.body.addWidget(self.msg_in)
 
+        if self.algo == "RSA":
+            from PySide6.QtWidgets import QCheckBox
+            from asymmetric.rsa import taille_max_oaep
+            self._oaep_max = taille_max_oaep(int(self.bits_dd.value()))
+            self.hybrid_chk = QCheckBox(
+                f"Mode hybride RSA + AES-GCM (necessaire au-dela de {self._oaep_max} octets)"
+            )
+            self.hybrid_chk.setToolTip(
+                "RSA-OAEP-SHA256 chiffre au plus 'taille_cle/8 - 66' octets en un appel.\n"
+                "Hybride : RSA chiffre une cle AES aleatoire, AES-GCM chiffre le message complet."
+            )
+            side.body.addWidget(self.hybrid_chk)
+            # Refresh the limit whenever key size changes.
+            self.bits_dd.changed.connect(self._refresh_oaep_limit)
+
         btn = QPushButton("Chiffrer ->")
         btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
         btn.clicked.connect(self._on_encrypt)
@@ -1372,6 +1419,15 @@ class AsymmetricEncryptPanel(QWidget):
         side.body.addWidget(self.cipher_out)
         side.body.addStretch(1)
         return side
+
+    def _refresh_oaep_limit(self, _=None):
+        if self.algo != "RSA":
+            return
+        from asymmetric.rsa import taille_max_oaep
+        self._oaep_max = taille_max_oaep(int(self.bits_dd.value()))
+        self.hybrid_chk.setText(
+            f"Mode hybride RSA + AES-GCM (necessaire au-dela de {self._oaep_max} octets)"
+        )
 
     def _build_decrypt_side(self) -> QWidget:
         side = SectionFrame("Dechiffrement (avec cle privee)")
@@ -1466,7 +1522,16 @@ class AsymmetricEncryptPanel(QWidget):
             if self.algo == "RSA":
                 from asymmetric import rsa as rsa_mod
                 msg = self.msg_in.to_bytes()
-                c = rsa_mod.chiffrer(self._pub, msg)
+                if self.hybrid_chk.isChecked():
+                    c = rsa_mod.chiffrer_hybride(self._pub, msg)
+                else:
+                    if len(msg) > self._oaep_max:
+                        raise ValueError(
+                            f"RSA-OAEP-SHA256 plafonne a {self._oaep_max} octets pour cette cle"
+                            f" (message = {len(msg)} octets). Cochez 'Mode hybride' pour passer"
+                            f" la limite avec RSA + AES-GCM."
+                        )
+                    c = rsa_mod.chiffrer(self._pub, msg)
                 self.cipher_out.set_bytes(c)
             else:
                 from asymmetric import elgamal
@@ -1491,7 +1556,13 @@ class AsymmetricEncryptPanel(QWidget):
             if self.algo == "RSA":
                 from asymmetric import rsa as rsa_mod
                 blob = self.cipher_in.to_bytes()
-                m = rsa_mod.dechiffrer(self._priv, blob)
+                # Pure-RSA output is exactly key_size/8 bytes; anything longer
+                # came from the hybrid path (RSA-wrapped key + nonce + AES-GCM).
+                rsa_len = self._priv.key_size // 8
+                if len(blob) == rsa_len:
+                    m = rsa_mod.dechiffrer(self._priv, blob)
+                else:
+                    m = rsa_mod.dechiffrer_hybride(self._priv, blob)
                 self.plain_out.set_bytes(m)
             else:
                 from asymmetric import elgamal

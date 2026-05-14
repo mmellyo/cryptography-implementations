@@ -5,8 +5,15 @@ import time
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 TAILLES_VALIDES = (512, 1024, 2048, 3072, 4096)
+SHA256_LEN = 32
+
+
+def taille_max_oaep(taille_bits: int) -> int:
+    """Max plaintext bytes for RSA-OAEP-SHA256 at the given modulus size."""
+    return taille_bits // 8 - 2 * SHA256_LEN - 2
 
 
 def generer_cles(taille_bits: int = 2048):
@@ -26,6 +33,28 @@ def chiffrer(pub, message: bytes) -> bytes:
 
 def dechiffrer(priv, chiffre: bytes) -> bytes:
     return priv.decrypt(chiffre, _padding_oaep())
+
+
+def chiffrer_hybride(pub, message: bytes) -> bytes:
+    """RSA + AES-256-GCM for messages exceeding the OAEP payload limit.
+
+    Wire format: [rsa_encrypted_aes_key (key_size/8 bytes)] [nonce (12)] [aes-gcm ciphertext + tag]
+    """
+    cle_aes = os.urandom(32)
+    nonce = os.urandom(12)
+    cle_rsa = pub.encrypt(cle_aes, _padding_oaep())
+    ct = AESGCM(cle_aes).encrypt(nonce, message, None)
+    return cle_rsa + nonce + ct
+
+
+def dechiffrer_hybride(priv, blob: bytes) -> bytes:
+    rsa_len = priv.key_size // 8
+    if len(blob) < rsa_len + 12 + 16:
+        raise ValueError("Chiffre hybride trop court")
+    cle_aes = priv.decrypt(blob[:rsa_len], _padding_oaep())
+    nonce = blob[rsa_len:rsa_len + 12]
+    ct = blob[rsa_len + 12:]
+    return AESGCM(cle_aes).decrypt(nonce, ct, None)
 
 
 def hybride_rsa_aes(taille_donnees: int = 1024 * 1024, taille_rsa: int = 2048):

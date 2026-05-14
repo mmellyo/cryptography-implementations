@@ -1,22 +1,27 @@
 """Diffie-Hellman key exchange with MITM attack and ECDSA-authenticated variant."""
 import secrets
 
-from sympy import nextprime, primitive_root
-
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import dh, ec
 
 MIN_BITS = 512
 
 
 def generer_p_g(bits: int = MIN_BITS):
+    # 2048+ : RFC 7919 well-known safe primes (instant, TLS-grade).
+    # 512/1024 : OpenSSL safe-prime gen (fast at small sizes).
+    # The OpenSSL search has a fat tail past 2048 bits that used to hang the
+    # GUI -- fixed groups remove that variance.
     if bits < MIN_BITS:
         raise ValueError(f"DH : taille minimale {MIN_BITS} bits")
-    seed = secrets.randbits(bits) | (1 << (bits - 1)) | 1
-    p = int(nextprime(seed))
-    g = int(primitive_root(p))
-    return p, g
+    from asymmetric._rfc7919 import well_known
+    pg = well_known(bits)
+    if pg is not None:
+        return pg
+    params = dh.generate_parameters(generator=2, key_size=bits)
+    nums = params.parameter_numbers()
+    return int(nums.p), int(nums.g)
 
 
 def cle_privee(p: int) -> int:

@@ -2,17 +2,28 @@
 import secrets
 from math import gcd
 
-from sympy import nextprime, primitive_root
+from cryptography.hazmat.primitives.asymmetric import dh
+
+from asymmetric._rfc7919 import well_known
 
 MIN_BITS = 512
 
 
 def generer_cles(bits: int = MIN_BITS):
+    # 2048+ : RFC 7919 well-known safe primes (instant, TLS-grade).
+    # 512/1024: generate fresh via OpenSSL (fast enough at those sizes, ~0.3s).
+    # OpenSSL's safe-prime search has a fat tail at 2048+ (5-60s), which is why
+    # we prefer fixed RFC 7919 groups there. Fresh-vs-fixed p doesn't weaken
+    # ElGamal: each session still draws fresh x, k.
     if bits < MIN_BITS:
         raise ValueError(f"ElGamal : taille minimale {MIN_BITS} bits")
-    seed = secrets.randbits(bits) | (1 << (bits - 1)) | 1
-    p = int(nextprime(seed))
-    g = int(primitive_root(p))
+    pg = well_known(bits)
+    if pg is None:
+        params = dh.generate_parameters(generator=2, key_size=bits)
+        nums = params.parameter_numbers()
+        p, g = int(nums.p), int(nums.g)
+    else:
+        p, g = pg
     x = secrets.randbelow(p - 3) + 2
     y = pow(g, x, p)
     return p, g, x, y

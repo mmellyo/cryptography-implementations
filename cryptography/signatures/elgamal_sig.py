@@ -3,16 +3,22 @@ import hashlib
 import secrets
 from math import gcd
 
-from sympy import nextprime, primitive_root
+from cryptography.hazmat.primitives.asymmetric import dh
 
 MIN_BITS = 512
 
 
 def _eea(a: int, b: int):
-    if a == 0:
-        return b, 0, 1
-    g, x, y = _eea(b % a, a)
-    return g, y - (b // a) * x, x
+    # Iterative: recursion depth ~log2(a) blows Python's stack at 2048 bits.
+    old_r, r = a, b
+    old_s, s = 1, 0
+    old_t, t = 0, 1
+    while r != 0:
+        q = old_r // r
+        old_r, r = r, old_r - q * r
+        old_s, s = s, old_s - q * s
+        old_t, t = t, old_t - q * t
+    return old_r, old_s, old_t
 
 
 def inv_mod(a: int, m: int) -> int:
@@ -23,11 +29,19 @@ def inv_mod(a: int, m: int) -> int:
 
 
 def gen_cles(bits: int = MIN_BITS):
-    if bits < 64:
-        raise ValueError("ElGamal-sig : taille minimale 64 bits (demo) / 512 en production")
-    seed = secrets.randbits(bits) | (1 << (bits - 1)) | 1
-    p = int(nextprime(seed))
-    g = int(primitive_root(p))
+    # 2048+ : RFC 7919 well-known safe primes (instant). 512/1024: fresh via
+    # OpenSSL. Safe-prime gen has a fat tail past 2048 bits which used to
+    # appear as a "hang" -- the fixed groups remove that variance.
+    if bits < MIN_BITS:
+        raise ValueError(f"ElGamal-sig : taille minimale {MIN_BITS} bits")
+    from asymmetric._rfc7919 import well_known
+    pg = well_known(bits)
+    if pg is None:
+        params = dh.generate_parameters(generator=2, key_size=bits)
+        nums = params.parameter_numbers()
+        p, g = int(nums.p), int(nums.g)
+    else:
+        p, g = pg
     x = secrets.randbelow(p - 3) + 2
     return p, g, x, pow(g, x, p)
 
